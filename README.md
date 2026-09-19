@@ -173,6 +173,12 @@ Si ça ne suffit pas, la conclusion honnête est que la bonne cible n'est pas un
 **dialecte** : un sous-ensemble canonique de Rust doté de `mi api`, du format de diagnostic et de la
 porte de scellement.
 
+## Expériences
+
+- [`experiments/ts-api-digest/`](experiments/ts-api-digest/) — l'idée de §7 mesurée sur le code de DeepSeek Harness :
+  leur troncature garde 11,4 % des caractères mais perd 69 % des symboles publics ; un digest de surface
+  en garde 32,5 % et 100 % des symboles.
+
 ## Performance : le contrat C
 
 Le régime scellé vise la parité C, et la spec ([§10](SPEC.md#10--performance--le-contrat-c)) énonce les
