@@ -96,7 +96,7 @@ Trois modes, aucun symbole, et le mode majoritaire ne s'écrit pas. Le caractèr
 
 Les durées de vie sont inférées et **ne sont jamais écrites**. Quand l'inférence échoue, le compilateur
 n'exige pas une annotation : il propose les trois réparations canoniques — `own`, `clone`, ou une région.
-Choix assumé : certains motifs zéro-copie exprimables en Rust ne le sont pas directement (§10).
+Choix assumé : certains motifs zéro-copie exprimables en Rust ne le sont pas directement (§11).
 
 ### 2.3 Régions
 
@@ -403,7 +403,108 @@ Le bac à sable est branché sur les effets : `mi run --allow fs` refuse au dém
 
 ---
 
-## §10 — Ce qu'on abandonne volontairement
+## §10 — Performance : le contrat C
+
+« Aussi rapide que le C » n'est pas une phrase qu'on écrit dans un README, c'est un contrat qui s'arrache
+clause par clause. Voici les clauses, et le seuil qui donne le droit d'écrire la phrase.
+
+### 10.1 Ce que le binaire scellé n'embarque pas
+
+- **Aucun ramasse-miettes**, aucun compteur de références — sauf `rc`/`arc` écrits explicitement.
+- **Aucun déroulement de pile.** Les erreurs sont des valeurs (§4) : pas de tables d'exception, pas de
+  *landing pad*, aucun coût sur le chemin heureux. Avantage déjà acquis sur C++ et sur Rust `panic=unwind`.
+- **Aucune initialisation de runtime.** Le point d'entrée est `main`, pas un préambule qui monte un tas managé.
+- **Aucun code de test.** Les blocs `test` et `prop` sont retirés en release.
+
+### 10.2 Représentation mémoire prévisible
+
+| Type Mira | Représentation | Équivalent C |
+|---|---|---|
+| `type P = {x: f64, y: f64}` | disposition déclarée, sans en-tête, sans réordonnancement | `struct P { double x, y; }` |
+| `Vec[T]` | trois mots : pointeur, longueur, capacité | `T*` + deux `size_t` |
+| `str` | deux mots : pointeur, longueur — UTF-8, *non* terminé par zéro | `char*` + `size_t` |
+| `T?` | niche quand il en existe une, sinon un mot de discriminant | `T*` nullable |
+| `fn f[T](…)` | monomorphisé par instanciation | macro ou code dupliqué |
+| `dyn Trait` | pointeur gras — **seulement si écrit** | pointeur + table de fonctions |
+
+La répartition dynamique n'arrive jamais par accident : un `trait` employé génériquement est monomorphisé,
+il faut écrire `dyn` pour payer une table de fonctions. Une signature dit son coût, et `mi api` le montre.
+
+### 10.3 Zéro vérification implicite — obtenu par la porte de scellement
+
+Clause la plus difficile, résolue par un mécanisme que le langage a déjà. Rust paie un contrôle de bornes
+sur `v[i]` et vous ne le voyez jamais passer. Mira n'en paie aucun — parce qu'en régime scellé, **une
+indexation non prouvée n'est pas compilée avec un garde : elle est une obligation.**
+
+```
+$ mi seal
+O220 img.mi:14:11  index-non-prouve  px[i]    fix:for-in | get | assert-range
+O221 img.mi:21:5   arith-non-prouve  a * b    fix:wrap | sat | try
+O222 img.mi:28:9   div-non-prouve    n / d    fix:assert | try
+3 obligations · 0 erreurs · sealed=no
+```
+
+| Issue | Ce qu'on écrit | Coût |
+|---|---|---|
+| L'analyse de plages le prouve | rien | nul — le garde n'est jamais émis |
+| Parcourir au lieu d'indexer | `for x in v:`, `v.windows(3)` | nul, par construction |
+| Rendre l'accès total | `v.get(i)` qui rend `T?` | un test que vous avez écrit, et que vous voyez |
+| Affirmer une fois pour un bloc | `assert i < v.len()` en tête de boucle | un test, hors de la boucle chaude |
+
+**La différence avec Rust n'est pas la vitesse du code généré, c'est la visibilité.** Dans les deux
+langages le code final peut être identique ; en Rust, savoir si le garde a survécu demande de lire
+l'assembleur. En Mira, le garde n'existe pas : soit c'est prouvé, soit c'est une ligne dans la liste
+d'obligations. La performance devient une propriété qu'on lit dans la sortie de `mi seal`.
+
+### 10.4 Arithmétique, sans violer la loi de cohérence
+
+C enroule en silence, et c'est pour ça qu'il est rapide. Mira enroule aussi : `+`, `-`, `*` sur les
+entiers compilent vers l'instruction machine nue, sans contrôle de débordement. Les variantes explicites
+existent — `a.sat_add(b)`, `a.try_add(b) -> u32!`.
+
+Comment attraper un débordement en développement sans casser la loi de cohérence de §1 ? **Le régime
+brouillon instrumente, il ne change jamais les résultats.** `mi run` détecte le débordement, l'enregistre,
+le signale à la sortie — et produit exactement la même valeur enroulée que le binaire scellé. Le
+comportement observable est identique ; seul s'ajoute un canal d'observation.
+
+```
+$ mi run
+resultat: 42
+3 debordements observes · u32 mul · hash.mi:21  (valeurs inchangees)
+```
+
+### 10.5 Là où Mira peut dépasser le C
+
+Trois endroits, conséquences directes de §2 :
+
+- **Non-aliasing gratuit.** Un `var` est un emprunt exclusif prouvé : le compilateur émet `noalias` sur
+  chaque paramètre mutable, partout, sans que personne n'écrive `restrict`. En C, deux pointeurs peuvent
+  toujours se recouvrir et l'optimiseur doit supposer le pire.
+- **Les régions battent `malloc`.** Une `region` alloue par déplacement d'un pointeur et libère en un seul
+  geste. Sur un parseur ou un graphe (§2.3), c'est structurellement plus rapide qu'une suite de
+  `malloc`/`free`, et ça élimine la fragmentation.
+- **La pureté ouvre des portes fermées au C.** Une fonction sans `+` est déterministe : évaluable à la
+  compilation, mise en cache, vectorisable ou parallélisable sans analyse d'alias. Un compilateur C doit
+  *prouver* l'absence d'effets ; Mira la lit dans la signature.
+
+### 10.6 Les échappatoires
+
+Quand la preuve coûte plus cher que le risque, `raw` donne les pointeurs bruts, l'arithmétique de
+pointeurs et les intrinsèques SIMD — en régime scellé uniquement, et toujours avec une ligne `safety:`
+sans laquelle le module ne scelle pas (§2.4). `ffi` appelle du C existant à coût nul : même ABI, même
+disposition, aucune conversion.
+
+> **Le contrat, mesurable.** Un binaire scellé doit tenir dans ±5 % de `clang -O2` sur au moins 10 des 12
+> micro-bancs du panier, et ne jamais dépasser +20 % sur aucun. Panier : `binary-trees`, `n-body`,
+> `mandelbrot`, `fasta`, `regex-redux`, `json-parse`, `memcpy-loop`, `hashmap-churn`, `sort-1e7`,
+> `matmul-512`, `tcp-echo`, `terminal-io`. Tant que ce seuil n'est pas atteint, la phrase « aussi rapide
+> que le C » ne s'écrit ni dans le README, ni dans cette spec — on écrit le chiffre mesuré à la place.
+> Même discipline que le critère d'abandon de §12 : une affirmation de performance sans banc est une
+> affirmation fausse.
+
+---
+
+## §11 — Ce qu'on abandonne volontairement
 
 Une spec qui ne liste pas ses renoncements n'est pas une spec, c'est une brochure.
 
@@ -426,7 +527,7 @@ un sous-ensemble canonique de Rust doté de `mi api`, du format de diagnostic et
 
 ---
 
-## §11 — Plan & falsifiabilité
+## §12 — Plan & falsifiabilité
 
 **Phase 0 — le banc, avant le langage.** Un harness qui mesure le coût en tokens de chaque lexème candidat
 sur les vocabulaires cibles, et une suite de 100 tâches avec la métrique *tokens-jusqu'au-vert*, mesurée

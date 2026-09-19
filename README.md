@@ -14,7 +14,7 @@
 
 ⚠️ **Il n'existe aucun compilateur.** Ce dépôt contient une spécification, un guide et des programmes
 d'exemple qui décrivent le comportement *spécifié*. Rien n'est exécutable aujourd'hui. La phase 0
-(§11 de la spec) construit le banc de mesure qui validera — ou enterrera — la thèse.
+(§12 de la spec) construit le banc de mesure qui validera — ou enterrera — la thèse.
 
 | | |
 |---|---|
@@ -172,6 +172,27 @@ transforment l'apprentissage en boucle fermée plutôt qu'en devinette.
 Si ça ne suffit pas, la conclusion honnête est que la bonne cible n'est pas un langage neuf mais un
 **dialecte** : un sous-ensemble canonique de Rust doté de `mi api`, du format de diagnostic et de la
 porte de scellement.
+
+## Performance : le contrat C
+
+Le régime scellé vise la parité C, et la spec ([§10](SPEC.md#10--performance--le-contrat-c)) énonce les
+clauses plutôt que le slogan : aucun runtime, aucun déroulement de pile, disposition mémoire identique au
+C, monomorphisation, et **zéro vérification implicite** — une indexation non prouvée n'est pas compilée
+avec un garde, elle devient une obligation de scellement :
+
+```
+$ mi seal
+O220 img.mi:14:11  index-non-prouve  px[i]  fix:for-in | get | assert-range
+```
+
+Trois endroits où Mira peut *dépasser* le C : `noalias` gratuit sur chaque emprunt exclusif (le C doit
+supposer que deux pointeurs se recouvrent), les régions qui allouent par déplacement de pointeur au lieu
+de `malloc`, et la pureté lisible dans la signature qui ouvre l'évaluation à la compilation et la
+vectorisation sans analyse d'alias.
+
+**Le seuil, écrit à l'avance :** ±5 % de `clang -O2` sur au moins 10 des 12 micro-bancs du panier, jamais
+plus de +20 % sur aucun. Tant qu'il n'est pas atteint, la phrase « aussi rapide que le C » ne s'écrit pas
+ici — on écrit le chiffre mesuré à la place.
 
 ## Licence
 
