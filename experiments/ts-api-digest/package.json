@@ -1,0 +1,11 @@
+{
+  "name": "ts-api-digest",
+  "private": true,
+  "type": "module",
+  "description": "Extraction de surface publique TypeScript — l'idée de Mira §7, mesurée sur du vrai code.",
+  "scripts": {
+    "measure": "node measure.mjs ./corpus",
+    "inspect": "node inspect.mjs"
+  },
+  "dependencies": { "typescript": "^5.9.3" }
+}

@@ -175,9 +175,10 @@ porte de scellement.
 
 ## Expériences
 
-- [`experiments/ts-api-digest/`](experiments/ts-api-digest/) — l'idée de §7 mesurée sur le code de DeepSeek Harness :
-  leur troncature garde 11,4 % des caractères mais perd 69 % des symboles publics ; un digest de surface
-  en garde 32,5 % et 100 % des symboles.
+- [`experiments/ts-api-digest/`](experiments/ts-api-digest/) — l'idée de §7 mesurée sur le code de
+  DeepSeek Harness. À taille pratiquement égale (12,4 % contre 11,4 % des caractères), un digest de
+  surface publique conserve **100 % des symboles exportés** là où la troncature par caractères en perd
+  69 %.
 
 ## Performance : le contrat C
 
