@@ -1,0 +1,7 @@
+seal mod main
+
+fn main() -> Unit! + io fs env:
+  let path = env.args.get(1) or "README.md"
+  let text = fs.read_str(path)?
+  for w, n in wordcount.top(text, 10):
+    io.print("{n:>5}  {w}")

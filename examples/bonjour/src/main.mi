@@ -1,0 +1,10 @@
+fn greet(name: str) -> str:
+  "hello, {name}"
+
+fn main() + io env:
+  let who = env.args.get(1) or "monde"
+  io.print(greet(who))
+
+test greet:
+  greet("Nico") == "hello, Nico"
+  greet("") == "hello, "

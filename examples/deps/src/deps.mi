@@ -1,0 +1,85 @@
+seal mod deps
+
+err Deps = IoErr | Cycle(Vec[str])
+
+pub type Mod = {name: str, uses: Vec[str]}
+  derive Eq Json
+
+# --- bord : le seul endroit qui a des effets ---------------------
+
+pub fn scan(root: Path) -> Vec[Mod]!Deps + fs:
+  fs.glob(root, "src/**/*.mi")
+    .par_map(p -> Mod{name: p.stem(), uses: refs(fs.read_str(p)?)})
+    .collect()?
+
+fn refs(src: str) -> Vec[str]:
+  var out: Vec[str] = []
+  for w in src.split_any(" \n\t(),"):
+    match w.split_once("."):
+      some (m, _): if m.is_lower(): out.push(m)
+      none: pass
+  out.dedup()
+
+# --- graphe : region, cycles permis ------------------------------
+
+type Node = {name: str, out: Vec[Node]}
+
+pub fn check(mods: Vec[Mod]) -> Unit!Deps:
+  region g:
+    var nodes = mods.map(m -> g.new Node{name: m.name, out: []})
+    let by: Map[str, Node] = nodes.map(n -> (n.name, n)).to_map()
+    for m, n in mods.zip(nodes):
+      for u in m.uses:
+        match by.get(u):
+          some t: n.out.push(t)
+          none: pass
+    match find_cycle(nodes):
+      some path: err Cycle(g.out(path))   # g.out : sans lui -> E211
+      none: ok
+
+# --- coeur pur : aucun effet -------------------------------------
+
+type Mark = New | Open | Done
+
+fn find_cycle(nodes: Vec[Node]) -> Vec[str]?:
+  var mark: Map[str, Mark] = {}
+  var stack: Vec[str] = []
+  for n in nodes:
+    match walk(n, mark, stack):
+      some c: return some c
+      none: pass
+  none
+
+fn walk(n: Node, var mark: Map[str, Mark], var stack: Vec[str]) -> Vec[str]?:
+  match mark.get(n.name) or New:
+    Open: return some stack.from(stack.find(n.name) or 0)
+    Done: return none
+    New: pass
+  mark.set(n.name, Open)
+  stack.push(n.name)
+  for t in n.out:
+    match walk(t, mark, stack):
+      some c: return some c
+      none: pass
+  stack.pop()
+  mark.set(n.name, Done)
+  none
+
+# --- tests -------------------------------------------------------
+
+fn id(i: u32) -> str:
+  "m{i}"
+
+fn chain(n: u32) -> Vec[Mod]:
+  (0..n).map(i -> Mod{name: id(i), uses: if i + 1 < n: [id(i + 1)] else: []})
+        .collect()
+
+fn ring(n: u32) -> Vec[Mod]:
+  (0..n).map(i -> Mod{name: id(i), uses: [id((i + 1) % n)]}).collect()
+
+test check:
+  check([]) == ok
+  check(chain(3)) == ok
+  check(ring(3)) == err Cycle(["m0", "m1", "m2"])
+  prop n: u32 -> check(chain(n.clamp(0, 200))) == ok
+  prop n: u32 -> check(ring(n.clamp(2, 200))) != ok

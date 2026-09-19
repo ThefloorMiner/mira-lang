@@ -1,0 +1,14 @@
+seal mod main
+
+fn main() -> Unit! + io fs env proc:
+  let root = env.args.get(1) or "."
+  match deps.check(deps.scan(root)?):
+    ok:
+      io.print("✓ aucun cycle")
+    err Cycle(p):
+      let chain = p.join(" → ")
+      io.eprint("✗ cycle : {chain}")
+      proc.exit(1)
+    err e:
+      io.eprint("✗ {e}")
+      proc.exit(2)

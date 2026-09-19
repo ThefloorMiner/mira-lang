@@ -1,0 +1,14 @@
+seal mod wordcount
+
+pub fn top(text: str, n: u32) -> Vec[(str, u32)]:
+  var counts: Map[str, u32] = {}
+  for w in text.lower().split():
+    counts.upsert(w, 0, c -> c + 1)
+  var pairs = counts.drain()
+  pairs.sort_by(p -> -(p.1 as i64))
+  pairs.take(n)
+
+test top:
+  top("a b a", 1) == [("a", 2)]
+  top("", 5) == []
+  prop t: str -> top(t, 0).len() == 0
