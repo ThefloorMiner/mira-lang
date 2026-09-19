@@ -96,7 +96,7 @@ Trois modes, aucun symbole, et le mode majoritaire ne s'écrit pas. Le caractèr
 
 Les durées de vie sont inférées et **ne sont jamais écrites**. Quand l'inférence échoue, le compilateur
 n'exige pas une annotation : il propose les trois réparations canoniques — `own`, `clone`, ou une région.
-Choix assumé : certains motifs zéro-copie exprimables en Rust ne le sont pas directement (§11).
+Choix assumé : certains motifs zéro-copie exprimables en Rust ne le sont pas directement (§14).
 
 ### 2.3 Régions
 
@@ -243,7 +243,7 @@ match find(7):
 
 ### 4.1 Effets
 
-Ensemble clos et court : `io`, `fs`, `net`, `clock`, `rand`, `env`, `proc`, `ffi`. Une fonction sans `+`
+Ensemble clos et court : `io`, `fs`, `net`, `clock`, `rand`, `env`, `proc`, `task` (§11), `gpu` (§12), `ffi`. Une fonction sans `+`
 est pure : déterministe, parallélisable, testable par propriété gratuitement.
 
 ```mira
@@ -499,12 +499,223 @@ disposition, aucune conversion.
 > `mandelbrot`, `fasta`, `regex-redux`, `json-parse`, `memcpy-loop`, `hashmap-churn`, `sort-1e7`,
 > `matmul-512`, `tcp-echo`, `terminal-io`. Tant que ce seuil n'est pas atteint, la phrase « aussi rapide
 > que le C » ne s'écrit ni dans le README, ni dans cette spec — on écrit le chiffre mesuré à la place.
-> Même discipline que le critère d'abandon de §12 : une affirmation de performance sans banc est une
+> Même discipline que le critère d'abandon de §15 : une affirmation de performance sans banc est une
 > affirmation fausse.
 
 ---
 
-## §11 — Ce qu'on abandonne volontairement
+## §11 — Concurrence
+
+La décision la plus lourde de cette section est une soustraction : **Mira n'a ni `async` ni `await`.**
+La coloration de fonctions est la première cause d'erreur des modèles en Rust et en JavaScript, et elle
+contamine chaque signature qu'elle touche.
+
+### 11.1 Deux choses distinctes, et une seule est un effet
+
+```mira
+fn total(paths: Vec[Path]) -> u64! + fs:          # parallèle, et pourtant sans effet `task`
+  paths.par_map(p -> fs.read(p)?.len() as u64)?.sum()
+
+fn serve(port: u16) -> Unit! + net task:          # concurrent : l'ordonnancement est observable
+  par:
+    for conn in net.listen(port)?:
+      spawn handle(conn)
+```
+
+`par_map` sur une fermeture pure rend le même résultat quel que soit l'ordonnancement : c'est une
+optimisation, pas un effet, et la signature n'en porte aucune trace. `spawn`, les canaux et les verrous
+rendent l'ordre observable : c'est l'effet **`task`**, neuvième de l'ensemble clos de §4.1.
+
+*Conséquence pratique :* une fonction pure reste parallélisable gratuitement, et `mi api` montre d'un
+coup d'œil quels modules introduisent du non-déterminisme. Sur du code écrit par une machine, c'est la
+différence entre un test rejouable et un test qui échoue un jour sur cent.
+
+### 11.2 Portées structurées : aucune tâche détachée
+
+`par:` ouvre une portée. Toute tâche lancée dedans est jointe — ou annulée — au dédentage, sans
+exception. Il n'existe aucune façon de détacher une tâche, donc aucune façon d'en oublier une.
+
+```mira
+let (tx, rx) = chan[Job](64)     # la capacité est obligatoire : pas de canal non borné
+
+par:
+  spawn produce(tx)              # une erreur dans une tâche annule ses soeurs
+  for j in rx:                   # et remonte au dédentage
+    handle(j)?
+```
+
+Un canal non borné est une fuite mémoire qui attend son jour de charge ; exiger la capacité coûte trois
+caractères et supprime une classe entière d'incidents.
+
+### 11.3 L'état partagé appartient à son verrou
+
+Par défaut rien n'est partagé : on déplace les données dans la tâche avec `own`. Quand il faut vraiment
+partager, le verrou *possède* la donnée — il n'existe aucun chemin d'accès qui ne passe pas par lui.
+
+```mira
+let hits = mutex(0)
+
+with hits as var n:              # verrou tenu pour le bloc, relâché au dédentage
+  n += 1                         # aucune façon d'atteindre n sans ce `with`
+```
+
+`arc T` pour le partage immuable, `atom[u64]` pour les compteurs. `Send` et `Sync` ne s'écrivent jamais :
+ils se déduisent de la propriété (§2.5).
+
+### 11.4 L'ordre des verrous, vérifié
+
+L'absence d'interblocage est indécidable en général. Une approximation conservatrice ne l'est pas :
+chaque verrou reçoit un rang statique de son site de déclaration, et prendre un rang inférieur alors
+qu'on en tient un supérieur devient une obligation de scellement.
+
+```
+$ mi seal
+O230 srv.mi:44:5  ordre-de-verrous  cache(2) pris sous db(5)  fix:reorder | merge | rank
+1 obligation · 0 erreurs · sealed=no
+```
+
+C'est la discipline des noyaux, rarement offerte dans un langage applicatif. Elle rejette des programmes
+corrects — d'où les trois réparations, dont `rank` qui déclare un ordre explicite.
+
+### 11.5 Fils verts, et la réconciliation avec §10
+
+Les tâches sont des fils verts multiplexés M:N. Une opération d'E/S bloque la tâche, jamais le fil
+système : on écrit du code séquentiel, il s'exécute de façon concurrente, et aucune signature n'est
+colorée.
+
+> **Cela contredit-il « aucune initialisation de runtime » (§10.1) ? Non, et le détail compte.**
+> L'ordonnanceur est une bibliothèque, pas un runtime de langage : un programme dont aucune fonction ne
+> déclare `task` ne le lie pas, et son binaire est exactement aussi nu qu'un binaire C. Un programme
+> concurrent lie l'ordonnanceur comme un programme C lie `pthreads`. Le système d'effets rend cette
+> propriété vérifiable plutôt que promise.
+
+**Le prix, énoncé :** un appel FFI bloquant ne peut pas être suspendu par l'ordonnanceur. La tâche est
+alors épinglée à un fil système le temps de l'appel, ce qui consomme un fil du pool. C'est le coût réel
+du choix « pas de coloration », et il se paie sur les frontières C, pas dans le code Mira.
+
+---
+
+## §12 — Graphique
+
+Une spec v0.1 n'a pas à inventer une boîte à outils d'interface. Ce qu'elle doit trancher, c'est le
+modèle mémoire de part et d'autre de la frontière CPU–GPU — parce que c'est là que la propriété a
+quelque chose à dire, et que personne d'autre ne le dit.
+
+### 12.1 Un tampon GPU est une région
+
+Une région, c'est « une seule durée de vie, libérée en bloc » (§2.3). Un tampon GPU, c'est exactement ça,
+avec un autre allocateur. Le concept se réutilise tel quel au lieu d'en inventer un deuxième.
+
+```mira
+fn frame(var w: Window, t: f32) -> Unit! + gpu:
+  region f on gpu:                    # arène de trame, en mémoire périphérique
+    let verts = f.new Mesh(scene(t))  # même règle d'échappement qu'en §2.3
+    w.draw(verts, tint, 0.8)          # libérée entièrement au dédentage
+```
+
+Conséquence directe pour le temps réel : l'arène de trame se libère d'un seul geste à chaque image. Pas
+de ramasse-miettes, pas de pauses, pas de fragmentation — la discipline que les moteurs de jeu
+appliquent à la main, ici portée par le langage.
+
+### 12.2 La mémoire projetée est un emprunt exclusif
+
+Écrire depuis le CPU dans un tampon que le GPU est en train de lire est une classe de bug entière,
+silencieuse et pénible à reproduire. C'est aussi, littéralement, un emprunt exclusif violé — donc le
+vérificateur de §2 l'attrape sans rien apprendre de nouveau.
+
+```mira
+with buf.map() as var bytes:     # emprunt exclusif du tampon, borné au bloc
+  bytes.fill(0)                  # le GPU ne peut pas y toucher pendant ce temps
+```
+
+```
+$ mi seal
+E240 draw.mi:12:3  tampon-en-vol  buf (soumis 9:5)  fix:with-map | double-buffer
+1 erreur · sealed=no
+```
+
+### 12.3 Les nuanceurs s'écrivent en Mira
+
+Un troisième marqueur de régime, après `draft` et `seal` : `gpu`. La fonction est compilée vers SPIR-V et
+restreinte à un sous-ensemble pur — aucune allocation, aucun effet, aucune récursion, aucune boucle non
+bornée. Les violations sortent en obligations, comme le reste.
+
+```mira
+gpu fn tint(px: vec4, k: f32) -> vec4:
+  px * k
+```
+
+Le bénéfice est celui de tout le langage : **une seule syntaxe**. Pas de WGSL en chaîne de caractères,
+pas de second jeu de priors à acquérir pour le modèle, et `mi api` couvre les nuanceurs comme le reste.
+
+### 12.4 Ce qui est dans le langage et ce qui ne l'est pas
+
+| Couche | Où elle vit | Effet |
+|---|---|---|
+| Régions GPU, projection, `gpu fn` | dans le langage | `gpu` |
+| `gpu` — sémantique WebGPU sur Vulkan, Metal, D3D12, WASM | bibliothèque de base | `gpu` |
+| `win` — fenêtres, entrées, écrans | paquet | `gpu io` |
+| `ui` — widgets, mise en page, texte | paquet, **hors v0.1** | `gpu io` |
+
+Le choix de WebGPU n'est pas esthétique : c'est la seule abstraction portable qui couvre les trois API
+natives *et* la cible WASM déjà présente en §9. Un même binaire de rendu vise le bureau et le navigateur.
+
+---
+
+## §13 — Bibliothèque de base
+
+Comme il n'y a pas d'imports (§3.5), la bibliothèque est ambiante — donc sa carte n'est pas de la
+documentation, c'est la surface du langage.
+
+### 13.1 Noyau pur : aucun effet, toujours disponible
+
+| Module | Contenu |
+|---|---|
+| `str` | découpage, recherche, casse, normalisation Unicode, greffons |
+| `vec` `map` `set` `deque` | collections ; `Map` et `Set` ordonnés par insertion |
+| `iter` | paresseux : `map` `filter` `fold` `zip` `windows` `chunks` `par_map` |
+| `sort` `cmp` | tri stable, ordres, `min_by` / `max_by` |
+| `num` `math` `bit` | entiers et flottants, saturation, trigonométrie, opérations binaires |
+| `bytes` `enc` `hash` | tampons, base64, hexadécimal, SHA-2, BLAKE3, hachage non cryptographique |
+| `fmt` | formatage ; le moteur derrière `"{x:>5}"` |
+| `json` `csv` `toml` | analyse et sérialisation, via `derive Json` |
+| `re` | expressions régulières, automate fini — pas de retour arrière, temps linéaire garanti |
+| `time` | durées, instants, calendrier — *pure* ; lire l'heure est un effet (`clock`) |
+| `vec2` `vec4` `mat4` | algèbre linéaire courte, partagée avec `gpu fn` (§12.3) |
+
+### 13.2 Modules à effet
+
+| Module | Contenu | Effet |
+|---|---|---|
+| `io` | entrée et sortie standard, terminal | `io` |
+| `log` | journalisation structurée, niveaux | `io` |
+| `fs` | fichiers, répertoires, `glob`, surveillance | `fs` |
+| `net` `http` | TCP, UDP, TLS ; client et serveur HTTP | `net` |
+| `clock` | heure courante, minuteries, sommeil | `clock` |
+| `rand` | aléatoire cryptographique et ensemencé | `rand` |
+| `env` | arguments, variables d'environnement | `env` |
+| `proc` | sous-processus, signaux, code de retour | `proc` |
+| `chan` `mutex` `atom` | concurrence (§11) | `task` |
+| `gpu` | rendu, sémantique WebGPU (§12) | `gpu` |
+| `ffi` | appel de C, pointeurs bruts | `ffi` |
+
+> **Dix effets, et c'est fermé :** `io fs net clock rand env proc task gpu ffi`. Un module de base ne peut
+> pas en introduire un onzième — sinon `mi run --allow` (§8) cesserait d'être une garantie et redeviendrait
+> une convention.
+
+### 13.3 Ce qui n'est pas dans la base
+
+Paquets, déclarés dans `mi.toml`, ambiants sous leur nom : bases de données, gRPC, images, audio, `win`,
+`ui`. La règle de partage est simple — **la base contient ce dont le compilateur, les tests et `mi api`
+ont besoin pour fonctionner**, plus ce qu'on ne peut pas raisonnablement demander à chacun de réécrire.
+
+La bibliothèque de base est elle-même écrite en Mira et scellée. Deux conséquences : `mi api` fonctionne
+dessus comme sur n'importe quel module, et elle constitue le premier corpus de référence — celui sur
+lequel se mesure la phase 1 de §15.
+
+---
+
+## §14 — Ce qu'on abandonne volontairement
 
 Une spec qui ne liste pas ses renoncements n'est pas une spec, c'est une brochure.
 
@@ -519,7 +730,7 @@ Une spec qui ne liste pas ses renoncements n'est pas une spec, c'est une brochur
 
 **Le vrai risque, qui domine tous les autres : un langage neuf a zéro donnée d'entraînement.** Un modèle
 écrit du Python correct parce qu'il en a lu des milliards de lignes. Atténuations : (1) la surface est à
-~90 % l'intersection Rust ∩ Python déjà connue ; (2) la spec entière tient sous 12 000 tokens ; (3) les
+~90 % l'intersection Rust ∩ Python déjà connue ; (2) la spec entière pèse ≈ 11 500 tokens, donc elle rentre dans le contexte — mais le budget est presque épuisé, et toute section ajoutée devra en retirer une autre ; (3) les
 obligations et les `fix:` transforment l'apprentissage en boucle fermée.
 
 Si la phase 0 montre que ça ne suffit pas, la bonne cible n'est pas un langage neuf mais un **dialecte** :
@@ -527,7 +738,7 @@ un sous-ensemble canonique de Rust doté de `mi api`, du format de diagnostic et
 
 ---
 
-## §12 — Plan & falsifiabilité
+## §15 — Plan & falsifiabilité
 
 **Phase 0 — le banc, avant le langage.** Un harness qui mesure le coût en tokens de chaque lexème candidat
 sur les vocabulaires cibles, et une suite de 100 tâches avec la métrique *tokens-jusqu'au-vert*, mesurée

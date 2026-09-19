@@ -180,6 +180,39 @@ porte de scellement.
   surface publique conserve **100 % des symboles exportés** là où la troncature par caractères en perd
   69 %.
 
+## Multi-thread, graphique, bibliothèque de base
+
+**Concurrence ([§11](SPEC.md#11--concurrence))** — pas d'`async`, pas d'`await`, pas de coloration de
+fonctions : c'est la première cause d'erreur des modèles en Rust et en JS. Les tâches sont des fils verts
+M:N, et l'ordonnanceur est une bibliothèque, pas un runtime — un programme sans effet `task` ne le lie pas
+et reste aussi nu qu'un binaire C.
+
+Le parallélisme déterministe et la concurrence ne coûtent pas la même chose, et le type les distingue :
+
+```mira
+fn total(paths: Vec[Path]) -> u64! + fs:     # parallèle, aucun effet `task`
+  paths.par_map(p -> fs.read(p)?.len() as u64)?.sum()
+
+fn serve(port: u16) -> Unit! + net task:     # concurrent : l'ordre devient observable
+  par:
+    for conn in net.listen(port)?:
+      spawn handle(conn)                     # joint ou annulé au dédentage, sans exception
+```
+
+Un verrou possède sa donnée, donc il n'existe aucun accès qui ne passe pas par lui — et l'ordre des
+verrous est vérifié par rang statique (`O230 ordre-de-verrous  cache(2) pris sous db(5)`).
+
+**Graphique ([§12](SPEC.md#12--graphique))** — pas de boîte à outils GUI dans une v0.1 ; ce que la spec
+tranche, c'est la frontière CPU–GPU. Un tampon GPU **est** une région (§2.3) : arène de trame libérée
+d'un geste à chaque image, sans pause. La mémoire projetée est un emprunt exclusif, donc écrire dans un
+tampon en vol est une erreur de compilation, pas un bug irreproductible. Et les nuanceurs s'écrivent en
+Mira — `gpu fn`, compilé en SPIR-V — au lieu de WGSL en chaîne de caractères : une seule syntaxe.
+
+**Bibliothèque de base ([§13](SPEC.md#13--bibliothèque-de-base))** — comme il n'y a pas d'imports, elle
+est ambiante, donc sa carte fait partie de la surface du langage : collections, `iter`, `json`, `re` sans
+retour arrière, `fmt`, `time`… tout le noyau est pur. Dix effets, et l'ensemble est fermé :
+`io fs net clock rand env proc task gpu ffi`.
+
 ## Performance : le contrat C
 
 Le régime scellé vise la parité C, et la spec ([§10](SPEC.md#10--performance--le-contrat-c)) énonce les

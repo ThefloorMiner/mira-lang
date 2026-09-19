@@ -96,7 +96,7 @@ Neuf éléments, et vous savez lire n'importe quel programme Mira.
 | `:` + indentation | **Ouvre un bloc.** Une ligne commençant par `.` et plus indentée continue l'expression précédente. |
 | `"hello, {name}"` | **Interpolation**, format optionnel : `"{n:>5}"`. Pas de `format!`, pas de `+`. |
 | dernière ligne du bloc | **C'est la valeur de retour.** `return` ne sert qu'aux sorties anticipées. |
-| `+ io env` | **Les effets.** Liste close : `io fs net clock rand env proc ffi`. Pas de `+` ⇒ fonction pure. |
+| `+ io env` | **Les effets.** Liste close : `io fs net clock rand env proc task gpu ffi`. Pas de `+` ⇒ fonction pure. |
 | `.get(1) or "monde"` | **Optionnels sans panique.** `or` donne le défaut, `?` propage. Pas d'`unwrap`, pas de `null`. |
 | `test greet:` | **Le test est attaché à l'item.** Une expression nue est une assertion. Retiré du binaire en release. |
 
