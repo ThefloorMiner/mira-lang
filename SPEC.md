@@ -162,8 +162,15 @@ param   = pmode? IDENT ":" type          ; ":" type facultatif en draft
 pmode   = "var" | "own"                  ; défaut = emprunt partagé
 effects = "+" EFFECT { EFFECT }
 type    = IDENT [ "[" type {"," type} "]" ] [ "?" ] [ "!" [type] ]
-block   = INDENT { stmt } DEDENT
+block   = INDENT { stmt } DEDENT | stmt          ; corps en ligne apres ':'
+if_st   = "if" expr ":" block [ "else" ":" block ]  ; instruction : `else` facultatif
+if_ex   = "if" expr ":" expr "else" ":" expr        ; expression : `else` obligatoire
+postfix = primary { "." IDENT | call | index | "?" | "as" type
+                  | "." "new" postfix }             ; allocation en region, §2.3
 ```
+
+Ces trois productions viennent de l'amorce : écrire l'analyseur a révélé qu'elles manquaient. Le détail
+et les deux corrections sémantiques qui ont suivi sont dans [`bootstrap/README.md`](bootstrap/README.md).
 
 ### 3.2 Règle de lexique
 

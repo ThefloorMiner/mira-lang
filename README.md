@@ -12,8 +12,20 @@
 
 ## Statut
 
-⚠️ **Il n'existe aucun compilateur.** Ce dépôt contient une spécification, un guide et des programmes
-d'exemple qui décrivent le comportement *spécifié*. Rien n'est exécutable aujourd'hui. La phase 0
+✅ **Une amorce tourne.** [`bootstrap/mi.py`](bootstrap/) interprète le régime `draft` et exécute les
+trois exemples du dépôt, tests et propriétés compris. Écrire l'analyseur a révélé **trois trous dans la
+grammaire** de §3.1 et deux incohérences sémantiques dans les exemples — tout est documenté et corrigé.
+
+```
+$ python3 bootstrap/mi.py test examples/deps/src/deps.mi
+✓ check · 3 assertions · 2 proprietes · 200 cas · graine 8821
+
+$ python3 bootstrap/mi.py run examples/deps/src/main.mi --allow fs -- .
+E520 main.mi  module declare env io proc, non autorises  fix:--allow env io proc
+```
+
+⚠️ **Mais rien ne scelle encore.** Ce dépôt contient une spécification, un guide et des programmes
+d'exemple. Le régime `seal` — propriété, emprunts, régions, effets — n'est pas implémenté. La phase 0
 (§12 de la spec) construit le banc de mesure qui validera — ou enterrera — la thèse.
 
 | | |

@@ -174,9 +174,9 @@ pub fn top(text: str, n: u32) -> Vec[(str, u32)]:
   var counts: Map[str, u32] = {}
   for w in text.lower().split():
     counts.upsert(w, 0, c -> c + 1)
-  var pairs = counts.drain()
-  pairs.sort_by(p -> -(p.1 as i64))
-  pairs.take(n)
+  counts.drain()
+        .sort_by(p -> -(p.1 as i64))
+        .take(n)
 
 test top:
   top("a b a", 1) == [("a", 2)]
@@ -188,7 +188,7 @@ test top:
 |---|---|---|
 | `O301` ×2 | `text: str`, `n: u32`, `-> Vec[(str, u32)]` | Frontière `pub` : les types deviennent obligatoires. C'est aussi ce que lira `mi api`. |
 | `O204` | `counts.upsert(w, 0, c -> c + 1)` | `counts[w]` peut échouer ; `upsert` est total. Pas d'opération partielle silencieuse. |
-| — | `var pairs = counts.drain()` | `drain` prend possession, donc le tri se fait sur place. En brouillon, le RC masquait la question. |
+| — | `counts.drain().sort_by(…)` | `drain` prend possession des paires ; `sort_by` rend une nouvelle liste plutôt que de muter. |
 | `O410` | le bloc `test top:` | Tout `pub` est couvert, ou porte un `test none:` justifié. |
 
 ```console
