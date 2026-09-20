@@ -227,6 +227,8 @@ class Sealer:
             for st in stmts:
                 if st.kind == 'Let':
                     if t(st.expr): tainted.add(st.name)
+                elif st.kind == 'LetTuple':
+                    if t(st.expr): tainted.update(st.names)
                 elif st.kind == 'Assign' and st.target.kind == 'Name':
                     if t(st.expr): tainted.add(st.target.name)
                 elif st.kind == 'For':
@@ -373,6 +375,9 @@ class Sealer:
             if k == 'Let':
                 s._bexpr(mod, st.expr, scope, varidx)
                 scope[st.name] = 'mut' if st.mut else 'shared'
+            elif k == 'LetTuple':
+                s._bexpr(mod, st.expr, scope, varidx)
+                for nm in st.names: scope[nm] = 'mut' if st.mut else 'shared'
             elif k == 'Assign':
                 s._bexpr(mod, st.expr, scope, varidx)
                 r = root_of(st.target)

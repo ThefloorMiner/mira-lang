@@ -99,11 +99,15 @@ def lex(src):
             while i < n and src[i] != '\n': i += 1
             continue
         if c == '"':
-            j, esc = i + 1, False
+            # Le scanner doit connaitre l'interpolation : un guillemet a
+            # l'interieur d'un {..} appartient a l'expression, pas a la chaine.
+            j, esc, brace = i + 1, False, 0    # `brace`, surtout pas `depth`
             while j < n:
                 if esc: esc = False
                 elif src[j] == '\\': esc = True
-                elif src[j] == '"': break
+                elif src[j] == '{': brace += 1
+                elif src[j] == '}': brace = max(0, brace - 1)
+                elif src[j] == '"' and brace == 0: break
                 j += 1
             if j >= n: raise MiError('E102', line, 'chaine non terminee')
             push('STR', _scan_interp(src[i+1:j], line))
@@ -150,6 +154,7 @@ CMP = ('==','!=','<','<=','>','>=')
 class Parser:
     def __init__(s, toks, file='<mem>'):
         s.t, s.i, s.file = toks, 0, file
+        s.nocast = 0   # `with X as Y` : `as` y est un lieur, pas une conversion
 
     # ── curseur
     def peek(s, k=0):  return s.t[min(s.i + k, len(s.t) - 1)]
@@ -160,8 +165,8 @@ class Parser:
     def eat(s, kind, val=None):
         if not s.at(kind, val):
             t = s.peek()
-            raise MiError('E110', t.line,
-                          f'attendu {val or kind}, trouve {t.val if t.val is not None else t.kind}')
+            got = t.kind if t.kind in ('INDENT', 'DEDENT', 'NEWLINE', 'EOF') else t.val
+            raise MiError('E110', t.line, f'attendu {val or kind}, trouve {got}')
         return s.next()
     def opt(s, kind, val=None):
         if s.at(kind, val): return s.next()
@@ -171,6 +176,10 @@ class Parser:
 
     # ── types (analyses pour `mi api`, non verifies en draft)
     def type_(s):
+        pre = ''
+        if (s.at('NAME') and s.peek().val in ('rc', 'arc')
+                and s.peek(1).kind in ('NAME', 'KW')):
+            pre = s.next().val + ' '          # partage compte (§2.4)
         if s.at('OP', '('):
             s.next(); parts = []
             while not s.at('OP', ')'):
@@ -189,7 +198,7 @@ class Parser:
         if s.opt('OP', '!'):
             base += '!'
             if s.at('NAME') and s.peek().val[0].isupper(): base += s.next().val
-        return base
+        return pre + base
 
     # ── module
     def module(s, name):
@@ -314,6 +323,13 @@ class Parser:
         t = s.peek(); ln = t.line
         if s.atkw('let', 'var'):
             mut = s.next().val == 'var'
+            if s.at('OP', '('):                      # destructuration (§11.2)
+                s.next(); names = []
+                while not s.at('OP', ')'):
+                    names.append(s.eat('NAME').val)
+                    if not s.opt('OP', ','): break
+                s.eat('OP', ')'); s.eat('OP', '=')
+                return N('LetTuple', line=ln, names=names, mut=mut, expr=s.expr())
             name = s.eat('NAME').val
             ty = s.type_() if s.opt('OP', ':') else None
             s.eat('OP', '=')
@@ -333,13 +349,16 @@ class Parser:
             return N('While', line=ln, cond=c, body=s.body_())
         if s.atkw('match'):  return s.match_()
         if s.atkw('with'):
-            s.next(); e = s.expr(); s.eat('KW', 'as')
+            s.next()
+            s.nocast += 1; e = s.expr(); s.nocast -= 1
+            s.eat('KW', 'as')
             s.opt('KW', 'var'); nm = s.eat('NAME').val; s.eat('OP', ':')
             return N('With', line=ln, expr=e, name=nm, body=s.block())
         if s.atkw('region'):
             s.next(); nm = s.eat('NAME').val
             dev = None
-            if s.at('NAME') and s.peek().val == 'on': s.next(); dev = s.eat('NAME').val
+            if s.at('NAME') and s.peek().val == 'on':
+                s.next(); dev = s.next().val    # `gpu` est un mot-cle (§12.1)
             s.eat('OP', ':')
             return N('Region', line=ln, name=nm, device=dev, body=s.block())
         if s.atkw('par'):
@@ -517,7 +536,7 @@ class Parser:
                 e = N('Index', line=t.line, obj=e, idx=ix)
             elif t.kind == 'OP' and t.val == '?':
                 s.next(); e = N('Try', line=t.line, e=e)
-            elif t.kind == 'KW' and t.val == 'as':
+            elif t.kind == 'KW' and t.val == 'as' and not s.nocast:
                 s.next(); e = N('Cast', line=t.line, e=e, type=s.type_())
             elif (t.kind == 'OP' and t.val == '{' and e.kind == 'Name'
                   and e.name[0].isupper()):
@@ -592,7 +611,8 @@ class Parser:
                 if not s.opt('OP', ','): break
             s.eat('OP', '}')
             return N('MapLit', line=ln, pairs=pairs)
-        raise MiError('E112', ln, f'expression attendue, trouve {t.val if t.val is not None else t.kind}')
+        got = t.kind if t.kind in ('INDENT', 'DEDENT', 'NEWLINE', 'EOF') else t.val
+        raise MiError('E112', ln, f'expression attendue, trouve {got}')
 
 
 def parse(src, name='main'):
@@ -769,6 +789,10 @@ class Interp:
         if k == 'ExprStmt': return s.eval(st.expr, env)
         if k == 'Let':
             env[st.name] = s.eval(st.expr, env); return UNIT
+        if k == 'LetTuple':
+            v = s.eval(st.expr, env)
+            for nm, x in zip(st.names, v): env[nm] = x
+            return UNIT
         if k == 'Assign':
             v = s.eval(st.expr, env)
             t = st.target

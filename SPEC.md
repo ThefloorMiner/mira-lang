@@ -248,10 +248,11 @@ fn find(id: u64) -> User!Db + fs:
   let mail = row.mail or "—"      # valeur par défaut sur none
   User{id, mail}
 
-match find(7):
-  ok u:            io.print(u.mail)
-  err Missing:     io.print("inconnu")
-  err Corrupt(m):  log.warn(m)
+fn report(id: u64) + io:
+  match find(id):
+    ok u:            io.print(u.mail)
+    err Missing:     io.print("inconnu")
+    err Corrupt(m):  log.warn(m)
 ```
 
 ### 4.1 Effets

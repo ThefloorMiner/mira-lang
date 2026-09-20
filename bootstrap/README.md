@@ -166,13 +166,15 @@ $ mi blind
 Quatre contrôles, sans une seule annotation de durée de vie dans le langage :
 
 ```mira
+fn grow(var v: Vec[u32], n: u32):
+  v.push(n)
+
 pub fn build() -> u32:
   let xs = [1, 2]
-  xs.push(3)            # E205 mutation-sans-var  fix:var | own
-
-fn grow(var v: Vec[u32], n: u32): …
-  grow(xs, xs.len())    # E208 alias-pendant-exclusif  fix:clone | reorder
-  swap2(xs, xs)         # E206 exclusif-double         fix:clone | split
+  xs.push(3)             # E205 mutation-sans-var       fix:var | own
+  var ys = [1]
+  grow(ys, ys.len())     # E208 alias-pendant-exclusif  fix:clone | reorder
+  ys.len()
 ```
 
 **Faux négatifs assumés, faux positifs interdits.** On ne conclut que lorsque la racine d'un accès est un
@@ -188,3 +190,39 @@ en trois jours, et il ne reste alors aucune vérification du tout.
    `for m, n in mods.zip(nodes)` puis `n.out.push(t)` — aurait été rejeté à tort.
 10. **`E206` et `E208` se déclenchaient ensemble** sur `swap2(xs, xs)` : une cause, deux lignes. §6.1
     exige racines d'abord et cascades supprimées. La cascade est maintenant supprimée.
+
+---
+
+## `check_docs.py` — la documentation ne ment pas
+
+Un document dont les exemples ne compilent pas est un document faux. Cet outil extrait chaque bloc Mira
+des `.md` et des `.html`, puis l'essaie selon trois lectures : *module*, *corps* (enveloppé dans une
+fonction), *signatures* (sans corps). Un extrait n'échoue que si aucune ne passe ; un extrait
+volontairement non analysable se marque `<code class="mi nocheck">`.
+
+```
+$ python3 bootstrap/check_docs.py
+  ✓ GUIDE.md                11 extraits   1 corps · 10 module
+  ✓ SPEC.md                 13 extraits   3 corps · 8 module · 2 signatures
+  ✓ SYNTAX.md               31 extraits  30 module · 1 signatures
+  …
+96/96 extraits analysables
+```
+
+### Ce qu'il a trouvé
+
+Au premier passage, **20 extraits sur 60 ne passaient pas**. Après tri, cinq vrais manques du langage :
+
+11. **La déstructuration `let (a, b) = …` n'existait pas.** La spec l'employait en §11.2 pour `chan`.
+12. **`as` était ambigu.** `with hits as var n:` se lisait `hits as var` — une conversion de type — avant
+    que l'analyseur ne cherche le `as` du `with`. Résolu par un drapeau : `as` n'est pas une conversion
+    dans un en-tête `with`.
+13. **`region f on gpu:` était refusé** parce que `gpu` est un mot-clé et que le code attendait un `NAME`.
+14. **`rc T` et `arc T` ne s'analysaient pas** : la production `type` n'admettait aucun préfixe, alors que
+    §2.4 les emploie.
+15. **Le scanner de chaînes ignorait l'interpolation.** Sur `"… {f("x")}"` il s'arrêtait au guillemet
+    interne. En le corrigeant j'ai nommé la profondeur d'accolades `depth` — le nom du compteur de
+    parenthèses du lexeur — ce qui l'écrasait à chaque chaîne et cassait tout le reste. Renommée `brace`.
+
+Et un défaut d'ergonomie : les messages d'erreur affichaient la *valeur* d'un `INDENT`/`DEDENT`, d'où des
+`trouve 0` incompréhensibles. Ils affichent maintenant le genre du jeton.

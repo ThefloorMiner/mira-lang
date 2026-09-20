@@ -45,7 +45,9 @@ d'exemple. L'analyse de plages, les types et les verrous ne sont pas vérifiés 
 |---|---|
 | **Spécification** | [`SPEC.md`](SPEC.md) — le *pourquoi*, 12 sections |
 | **Guide** | [`GUIDE.md`](GUIDE.md) — le *comment*, trois programmes complets |
+| **Syntaxe** | [`SYNTAX.md`](SYNTAX.md) — toute forme du langage, avec son statut réel |
 | **Exemples** | [`examples/`](examples/) — bonjour, wordcount, deps |
+| **Amorce** | [`bootstrap/`](bootstrap/) — `mi run/test/seal/api`, et ce qu'elle a trouvé |
 
 ---
 
@@ -94,7 +96,7 @@ pas toucher au monde extérieur en cachette — et c'est ce qui rend le bac à s
 
 ## Les deux régimes
 
-```mira
+```text
 draft mod wordcount              seal mod wordcount
 
 pub fn top(text, n):             pub fn top(text: str, n: u32) -> Vec[(str, u32)]:
