@@ -1,0 +1,7 @@
+# expect: E512
+seal mod effect_missing
+
+pub fn shout(m: str) -> Unit:
+  io.print(m)
+
+test shout: shout("x") == ok

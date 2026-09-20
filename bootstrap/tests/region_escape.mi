@@ -1,0 +1,11 @@
+# expect: E211
+seal mod region_escape
+
+type Node = {name: str}
+
+pub fn leak() -> str:
+  region g:
+    let n = g.new Node{name: "x"}
+    n.name
+
+test leak: leak() == "x"

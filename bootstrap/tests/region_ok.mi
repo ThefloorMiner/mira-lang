@@ -1,0 +1,11 @@
+# expect: sealed
+seal mod region_ok
+
+type Node = {name: str}
+
+pub fn fine() -> str:
+  region g:
+    let n = g.new Node{name: "x"}
+    g.out(n.name)
+
+test fine: fine() == "x"

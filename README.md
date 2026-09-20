@@ -24,8 +24,20 @@ $ python3 bootstrap/mi.py run examples/deps/src/main.mi --allow fs -- .
 E520 main.mi  module declare env io proc, non autorises  fix:--allow env io proc
 ```
 
-⚠️ **Mais rien ne scelle encore.** Ce dépôt contient une spécification, un guide et des programmes
-d'exemple. Le régime `seal` — propriété, emprunts, régions, effets — n'est pas implémenté. La phase 0
+✅ **Et `mi seal` applique la porte de §5.1.** Huit contrôles — régimes, effets inférés par point fixe,
+annotations publiques, opérations partielles, échappement de région, usage après déplacement, couverture
+de test — avec 11 cas de test et **ses angles morts déclarés** (`mi blind`).
+
+```
+$ python3 bootstrap/mi.py seal examples/deps/src/deps.mi
+0 obligations · 0 erreurs · sealed=ok
+
+$ python3 bootstrap/mi.py seal examples/deps/src/deps.mi   # apres avoir retire g.out(path)
+E211 deps.mi:36  echappement-region  valeur de region g:28 rendue par la fonction  fix:g.out | own
+```
+
+⚠️ **Mais la preuve reste partielle.** Ce dépôt contient une spécification, un guide et des programmes
+d'exemple. Les emprunts `var`, l'analyse de plages et les verrous ne sont pas vérifiés — voir `mi blind`. La phase 0
 (§12 de la spec) construit le banc de mesure qui validera — ou enterrera — la thèse.
 
 | | |

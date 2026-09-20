@@ -1,0 +1,5 @@
+# expect: O410
+seal mod untested
+
+pub fn lonely(a: u32) -> u32:
+  a + 1

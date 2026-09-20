@@ -1,0 +1,13 @@
+# expect: E204
+seal mod move_use
+
+fn eat(own v: Vec[u32]) -> u32:
+  v.len()
+
+pub fn bad() -> u32:
+  var xs = [1, 2, 3]
+  let a = eat(xs)
+  let b = xs.len()
+  a + b
+
+test bad: bad() == 6

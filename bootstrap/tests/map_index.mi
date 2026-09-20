@@ -1,0 +1,8 @@
+# expect: O204
+seal mod map_index
+
+pub fn look(k: str) -> u32:
+  var m: Map[str, u32] = {}
+  m[k]
+
+test look: look("a") == 0

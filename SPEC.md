@@ -293,7 +293,8 @@ cas de régression.
 3. Propriété, emprunts et échappement de région prouvés.
 4. Effets déclarés exacts (ni manquants, ni en trop).
 5. Tous les tests au vert, graines comprises.
-6. Tout item `pub` couvert par au moins un test, ou par un `test none: <raison>` explicite.
+6. Tout item `pub` couvert par au moins un test, ou par une dérogation explicite
+   `test f: "raison"` — un bloc `test` dont le corps est une seule chaîne littérale.
 7. Tout bloc `raw` muni d'une ligne `safety:`.
 
 ### 5.2 Exemple d'obligations
@@ -302,7 +303,7 @@ cas de régression.
 $ mi seal src/wc.mi
 O301 wc.mi:3:8   type-inconnu   text       fix:annotate str
 O204 wc.mi:6:5   index-dyn      counts[w]  fix:upsert | get_or
-O410 wc.mi:3:1   pub-non-teste  top        fix:add-test | test none:<raison>
+O410 wc.mi:3:1   pub-non-teste  top        fix:add-test | waive
 3 obligations · 0 erreurs · sealed=no
 ```
 

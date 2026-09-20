@@ -288,7 +288,7 @@ class Parser:
         ln = s.eat('KW', 'test').line
         name = s.eat('NAME').val if s.at('NAME') else s.next().val
         s.eat('OP', ':')
-        return N('Test', line=ln, name=name, body=s.block())
+        return N('Test', line=ln, name=name, body=s.body_())
 
     # ── blocs et instructions
     def body_(s):
@@ -1100,7 +1100,7 @@ def gen(ty, rnd):
     if t == 'Vec': return [rnd.randint(0, 50) for _ in range(rnd.randint(0, 6))]
     return rnd.randint(0, 100)
 
-def cmd_test(path, seed=8821, cases=100):
+def cmd_test(path, seed=8821, cases=100, quiet=False):
     asts, envs, g, out, root = load(path)
     it = Interp(asts); it.out = out
     total = fails = 0
@@ -1108,6 +1108,11 @@ def cmd_test(path, seed=8821, cases=100):
         env = envs[name]
         for d in m.decls:
             if d.kind != 'Test': continue
+            import seal as _s
+            if _s.is_waiver(d):
+                if not quiet:
+                    print(f'⊘ {d.name} · non teste : {_s.waiver_reason(d)}')
+                continue
             total += 1
             nasrt = nprop = ncase = 0
             bad = None
@@ -1136,13 +1141,45 @@ def cmd_test(path, seed=8821, cases=100):
                         bad = (st.line, str(ex)); break
             if bad:
                 fails += 1
-                print(f'✗ {d.name}  {path and ""}ligne {bad[0]} : {bad[1]}')
-            else:
+                if not quiet: print(f'✗ {d.name}  ligne {bad[0]} : {bad[1]}')
+            elif not quiet:
                 bits = [f'{nasrt} assertions'] if nasrt else []
                 if nprop: bits.append(f'{nprop} proprietes · {ncase} cas · graine {seed}')
                 print(f'✓ {d.name} · ' + ' · '.join(bits))
-    print(f'{total - fails}/{total} · graine {seed}')
-    return 1 if fails else 0
+    if not quiet: print(f'{total - fails}/{total} · graine {seed}')
+    return (total, fails) if quiet else (1 if fails else 0)
+
+def cmd_seal(path, budget=2000):
+    """SPEC §5.1 : la porte. N'imprime rien d'autre que la liste d'obligations."""
+    asts, envs, g, out, root = load(path)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import seal
+    obs = seal.Sealer(asts, root).run()
+
+    shown, spent, elided = [], 0, 0
+    for o in obs:                       # budget plafonne, racines d'abord (§6.1)
+        cost = len(str(o)) // 3
+        if spent + cost > budget: elided += 1; continue
+        shown.append(o); spent += cost
+    for o in shown: print(o)
+    if elided: print(f'… {elided} de plus, budget {budget} tokens atteint')
+
+    total, fails = cmd_test(path, quiet=True)
+    if fails: print(f'E420 {root}.mi  tests-rouges  {fails}/{total}  fix:mi test')
+
+    errs = sum(1 for o in obs if o.sev == 'E') + (1 if fails else 0)
+    obls = len(obs) - sum(1 for o in obs if o.sev == 'E')
+    ok = not obs and not fails
+    print(f'{obls} obligations · {errs} erreurs · sealed={"ok" if ok else "no"}')
+    return 0 if ok else 1
+
+
+def cmd_blind():
+    import seal
+    print('Ce que `mi seal` ne verifie PAS :')
+    for b in seal.BLIND_SPOTS: print('  · ' + b)
+    return 0
+
 
 def main(argv):
     if len(argv) < 2:
@@ -1163,6 +1200,15 @@ def main(argv):
     try:
         if cmd == 'run':  return cmd_run(path, args, allow)
         if cmd == 'test': return cmd_test(path)
+        if cmd == 'seal':
+            b = 2000
+            for a in rest[1:]:
+                if a.startswith('--budget='): b = int(a.split('=')[1].rstrip('k')) * (
+                    1000 if a.endswith('k') else 1)
+            return cmd_seal(path, b)
+        if cmd == 'blind':
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            return cmd_blind()
         if cmd == 'api':
             print(api(parse(open(path, encoding='utf-8').read(),
                             os.path.basename(path)[:-3]))); return 0
@@ -1187,4 +1233,10 @@ def _boot(argv):
     return box[0] if box else 1
 
 if __name__ == '__main__':
-    sys.exit(_boot(sys.argv))
+    # Lance comme script, ce fichier serait le module `__main__`, et seal.py
+    # importerait un SECOND exemplaire sous le nom `mi` : deux classes N
+    # distinctes, donc tous les isinstance du verificateur echouent en
+    # silence. On repasse par le module pour n'en avoir qu'une.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mi as _mi
+    sys.exit(_mi._boot(sys.argv))

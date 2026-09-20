@@ -1,0 +1,7 @@
+# expect: O513
+seal mod effect_unused
+
+pub fn pure_add(a: u32, b: u32) -> u32 + net:
+  a + b
+
+test pure_add: pure_add(1, 2) == 3

@@ -189,7 +189,7 @@ test top:
 | `O301` ×2 | `text: str`, `n: u32`, `-> Vec[(str, u32)]` | Frontière `pub` : les types deviennent obligatoires. C'est aussi ce que lira `mi api`. |
 | `O204` | `counts.upsert(w, 0, c -> c + 1)` | `counts[w]` peut échouer ; `upsert` est total. Pas d'opération partielle silencieuse. |
 | — | `counts.drain().sort_by(…)` | `drain` prend possession des paires ; `sort_by` rend une nouvelle liste plutôt que de muter. |
-| `O410` | le bloc `test top:` | Tout `pub` est couvert, ou porte un `test none:` justifié. |
+| `O410` | le bloc `test top:` | Tout `pub` est couvert, ou porte une dérogation `test f: "raison"`. |
 
 ```console
 $ mi seal

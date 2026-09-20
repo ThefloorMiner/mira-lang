@@ -1,0 +1,7 @@
+# expect: sealed
+seal mod waived
+
+pub fn lonely(a: u32) -> u32:
+  a + 1
+
+test lonely: "arithmetique triviale, couverte par le type"

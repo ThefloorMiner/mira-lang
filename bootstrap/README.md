@@ -90,3 +90,67 @@ Et **deux découvertes sémantiques** :
 Phase 1 telle que décrite en [§15](../SPEC.md#15--plan--falsifiabilité) : reprendre cette grammaire —
 maintenant qu'elle est validée — dans un lexeur, un analyseur et une VM à registres en Rust, avec un tas
 compté par références et un collecteur de cycles.
+
+---
+
+## `mi seal` — la porte
+
+[`seal.py`](seal.py) applique [§5.1](../SPEC.md#51-ce-que-mi-seal-exige) sur l'AST. Huit contrôles,
+tous avec une suite de cas dans [`tests/`](tests/) :
+
+| Code | Contrôle | §  |
+|---|---|---|
+| `E401` | item `draft` atteignable depuis `seal` | 1.3 |
+| `E512` / `O513` | effets manquants ou déclarés en trop, inférés par point fixe sur le graphe d'appel | 4.1 |
+| `O301` | frontière `pub` sans annotation | 5.1 |
+| `O204` / `O220` | indexation partielle d'une table, indexation non prouvée d'une séquence | 10.3 |
+| `E211` | échappement de région | 2.3 |
+| `E204` | usage après déplacement dans un paramètre `own` | 2.1 |
+| `O410` | item `pub` non testé | 5.1 |
+| `E420` | tests rouges | 5.1 |
+
+La sortie est au format `llm` de §6 : une ligne par constat, racines d'abord, budget plafonné.
+
+```
+$ mi seal src/deps.mi
+0 obligations · 0 erreurs · sealed=ok
+
+$ mi seal src/deps.mi            # apres avoir retire g.out(path)
+E211 deps.mi:36  echappement-region  valeur de region g:28 rendue par la fonction  fix:g.out | own
+0 obligations · 1 erreurs · sealed=no
+```
+
+```
+$ python3 bootstrap/run_tests.py
+  ✓ draft_in_seal.mi       E401
+  ✓ effect_missing.mi      E512
+  …
+11/11 cas
+```
+
+### Angles morts, déclarés
+
+`mi blind` les imprime, et ils sont dans le code à côté des contrôles. **Un vérificateur qui tait ses
+angles morts est pire qu'aucun vérificateur : il fait croire à une preuve qu'il n'a pas faite.**
+
+```
+$ mi blind
+  · Emprunts : `var` n'est pas verifie. Deux emprunts exclusifs simultanes passent.
+  · Arithmetique : O221/O222 demandent une analyse de plages, absente.
+  · Types : aucune inference ni verification.
+  · Verrous : O230 demande un graphe de rangs, absent.
+  · GPU : E240 n'est pas implemente.
+  · Regions : le suivi de contamination est conservateur mais pas sain.
+```
+
+### Ce que l'écriture du vérificateur a trouvé
+
+6. **`test none: <raison>` n'était pas analysable.** La forme de la spec ne nomme pas l'item qu'elle
+   couvre. Remplacée par `test f: "raison"` — un bloc `test` dont le corps est une seule chaîne
+   littérale, ce qui ne demande aucune syntaxe nouvelle et ne peut pas se confondre avec une assertion.
+7. **`scan` n'avait aucun test.** Le vérificateur l'a signalé sur mon propre code ; la fonction porte
+   maintenant une dérogation explicite.
+8. **Un bug qui rendait le vérificateur muet.** Lancé comme script, `mi.py` est le module `__main__`,
+   mais `seal.py` importe `mi` — deux classes `N` distinctes dans le processus, donc tous les
+   `isinstance` échouaient et le parcours d'arbre ne voyait rien. Le vérificateur *passait* sur tout.
+   Corrigé en repassant par le module, et le parcours utilise maintenant du typage canard.
