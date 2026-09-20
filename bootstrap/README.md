@@ -108,6 +108,10 @@ tous avec une suite de cas dans [`tests/`](tests/) :
 | `E204` | usage après déplacement dans un paramètre `own` | 2.1 |
 | `O410` | item `pub` non testé | 5.1 |
 | `E420` | tests rouges | 5.1 |
+| `E205` | mutation d'une liaison partagée (`let`, paramètre sans mode) | 2.1 |
+| `E207` | passage d'une liaison partagée à un paramètre `var` | 2.1 |
+| `E206` | même variable empruntée deux fois en exclusif dans un appel | 2.1 |
+| `E208` | variable lue pendant son emprunt exclusif | 2.1 |
 
 La sortie est au format `llm` de §6 : une ligne par constat, racines d'abord, budget plafonné.
 
@@ -122,10 +126,12 @@ E211 deps.mi:36  echappement-region  valeur de region g:28 rendue par la fonctio
 
 ```
 $ python3 bootstrap/run_tests.py
-  ✓ draft_in_seal.mi       E401
-  ✓ effect_missing.mi      E512
+  ✓ alias_exclusive.mi     E208
+  ✓ assign_to_let.mi       E205
+  ✓ borrow_ok.mi           sealed
+  ✓ double_exclusive.mi    E206
   …
-11/11 cas
+17/17 cas
 ```
 
 ### Angles morts, déclarés
@@ -135,7 +141,7 @@ angles morts est pire qu'aucun vérificateur : il fait croire à une preuve qu'i
 
 ```
 $ mi blind
-  · Emprunts : `var` n'est pas verifie. Deux emprunts exclusifs simultanes passent.
+  · Emprunts : verifies seulement quand la racine de l'acces est un nom simple.
   · Arithmetique : O221/O222 demandent une analyse de plages, absente.
   · Types : aucune inference ni verification.
   · Verrous : O230 demande un graphe de rangs, absent.
@@ -154,3 +160,31 @@ $ mi blind
    mais `seal.py` importe `mi` — deux classes `N` distinctes dans le processus, donc tous les
    `isinstance` échouaient et le parcours d'arbre ne voyait rien. Le vérificateur *passait* sur tout.
    Corrigé en repassant par le module, et le parcours utilise maintenant du typage canard.
+
+### Emprunts (§2.1)
+
+Quatre contrôles, sans une seule annotation de durée de vie dans le langage :
+
+```mira
+pub fn build() -> u32:
+  let xs = [1, 2]
+  xs.push(3)            # E205 mutation-sans-var  fix:var | own
+
+fn grow(var v: Vec[u32], n: u32): …
+  grow(xs, xs.len())    # E208 alias-pendant-exclusif  fix:clone | reorder
+  swap2(xs, xs)         # E206 exclusif-double         fix:clone | split
+```
+
+**Faux négatifs assumés, faux positifs interdits.** On ne conclut que lorsque la racine d'un accès est un
+nom simple connu de la portée. À travers une expression composée — `a.b[i]`, un résultat d'appel — rien
+n'est signalé. C'est un choix : un vérificateur qui crie au loup sur du code correct se fait désactiver
+en trois jours, et il ne reste alors aucune vérification du tout.
+
+### Ce que l'écriture du vérificateur d'emprunts a trouvé
+
+9. **Le mode d'une liaison de boucle n'était pas spécifié.** `for x in xs:` — `x` est-il exclusif ou
+   partagé ? Règle adoptée, cohérente avec §2.1 : hérité de la collection parcourue, jamais écrit ; et
+   non conclu quand la collection est une expression composée. Sans cette règle, `deps.check` — qui fait
+   `for m, n in mods.zip(nodes)` puis `n.out.push(t)` — aurait été rejeté à tort.
+10. **`E206` et `E208` se déclenchaient ensemble** sur `swap2(xs, xs)` : une cause, deux lignes. §6.1
+    exige racines d'abord et cascades supprimées. La cascade est maintenant supprimée.

@@ -1,0 +1,12 @@
+# expect: E207
+seal mod shared_to_var
+
+fn fill(var v: Vec[u32], n: u32):
+  v.push(n)
+
+pub fn go() -> u32:
+  let xs = []
+  fill(xs, 1)
+  xs.len()
+
+test go: go() == 1

@@ -1,0 +1,9 @@
+# expect: E205
+seal mod assign_to_let
+
+pub fn bump() -> u32:
+  let x = 1
+  x = 2
+  x
+
+test bump: bump() == 2

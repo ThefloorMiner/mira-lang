@@ -92,6 +92,12 @@ fn eat(own v: Vec[i32]) -> u32      # déplacement : v meurt ici
 
 Trois modes, aucun symbole, et le mode majoritaire ne s'écrit pas. Le caractère `&` n'existe pas.
 
+**Le mode d'une liaison de boucle est hérité, jamais écrit.** `for x in xs:` donne un `x` exclusif si
+`xs` est `var`, partagé sinon. Quand la collection est une expression composée — `a.zip(b)`, un résultat
+d'appel — le mode n'est pas conclu : le vérificateur s'abstient plutôt que de se tromper. C'est un faux
+négatif assumé, et c'est le bon sens du compromis : un outil qui signale du code correct se fait
+désactiver.
+
 ### 2.2 Aucune syntaxe de durée de vie
 
 Les durées de vie sont inférées et **ne sont jamais écrites**. Quand l'inférence échoue, le compilateur

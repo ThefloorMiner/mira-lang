@@ -1,0 +1,13 @@
+# expect: E206
+seal mod double_exclusive
+
+fn swap2(var a: Vec[u32], var b: Vec[u32]):
+  a.push(0)
+  b.push(1)
+
+pub fn go() -> u32:
+  var xs = [1]
+  swap2(xs, xs)
+  xs.len()
+
+test go: go() == 3

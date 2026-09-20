@@ -1,0 +1,12 @@
+# expect: E208
+seal mod alias_exclusive
+
+fn grow(var v: Vec[u32], n: u32):
+  v.push(n)
+
+pub fn go() -> u32:
+  var xs = [1]
+  grow(xs, xs.len())
+  xs.len()
+
+test go: go() == 2

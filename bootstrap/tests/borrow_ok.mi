@@ -1,0 +1,13 @@
+# expect: sealed
+seal mod borrow_ok
+
+fn grow(var v: Vec[u32], n: u32):
+  v.push(n)
+
+pub fn go() -> u32:
+  var xs = [1]
+  let k = xs.len()
+  grow(xs, k)
+  xs.len()
+
+test go: go() == 2

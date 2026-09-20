@@ -1,0 +1,9 @@
+# expect: E205
+seal mod mut_without_var
+
+pub fn build() -> u32:
+  let xs = [1, 2]
+  xs.push(3)
+  xs.len()
+
+test build: build() == 3

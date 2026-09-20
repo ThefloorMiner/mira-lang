@@ -23,6 +23,18 @@ AMBIENT = {
 PURE_METHODS_ON_MAP = {'get', 'set', 'upsert', 'has', 'keys', 'values', 'pairs', 'drain', 'len'}
 
 
+# ── methodes qui mutent leur receveur (SPEC §13.1)
+MUTATING = {'push', 'pop', 'set', 'upsert', 'clear', 'insert', 'remove',
+            'drain', 'extend', 'truncate', 'sort_in_place'}
+
+
+def root_of(e):
+    """Nom a la racine d'une chaine d'acces : a.b[i].c -> 'a'. None si compose."""
+    while _is_node(e) and e.kind in ('Attr', 'Index', 'TupleGet', 'Method'):
+        e = e.obj
+    return e.name if _is_node(e) and e.kind == 'Name' else None
+
+
 class Ob:
     """Une obligation ou une erreur. `sev` vaut 'E' (bloquant) ou 'O'."""
     __slots__ = ('code', 'file', 'line', 'kind', 'what', 'fix')
@@ -300,13 +312,109 @@ class Sealer:
                     s.add('E720', mod, n.line, 'raw-sans-justification', name,
                           'safety:<raison>')
 
+
+    # ═════════════════════════════════ 7. emprunts (§2.1)
+
+    def check_borrows(s):
+        """Mutabilite et unicite des emprunts exclusifs.
+
+        Faux negatifs assumes : on ne conclut que lorsque la racine d'un acces
+        est un nom simple et connu de la portee. Un emprunt a travers une
+        expression composee n'est pas verifie plutot que signale a tort — un
+        verificateur qui crie au loup sur du code correct se fait desactiver.
+        """
+        varidx = {k: [i for i, p in enumerate(d.params) if p.mode == 'var']
+                  for k, d in s.fns.items()}
+        for (mod, name), fn in s.fns.items():
+            if s.asts[mod].mode != 'seal': continue
+            scope = {p.name: ('mut' if p.mode in ('var', 'own') else 'shared')
+                     for p in fn.params}
+            s._bblock(mod, fn.body, scope, varidx)
+
+    def _callee(s, n, mod):
+        if n.kind == 'Call' and n.fn.kind == 'Name':   return (mod, n.fn.name)
+        if n.kind == 'Method' and getattr(n.obj, 'kind', '') == 'Name':
+            return (n.obj.name, n.name)
+        return None
+
+    def _bexpr(s, mod, e, scope, varidx):
+        for n in walk(e):
+            # mutation par methode
+            if n.kind == 'Method' and n.name in MUTATING:
+                r = root_of(n.obj)
+                if r and scope.get(r) == 'shared':
+                    s.add('E205', mod, n.line, 'mutation-sans-var',
+                          f'{r}.{n.name}()', 'var | own')
+            # passage a un parametre `var`
+            key = s._callee(n, mod)
+            if key in varidx and varidx[key]:
+                seen, exclusive, dup = {}, [], set()
+                for i, a in enumerate(getattr(n, 'args', [])):
+                    r = root_of(a)
+                    if r is None: continue
+                    seen.setdefault(r, []).append(i)
+                    if i in varidx[key]:
+                        if scope.get(r) == 'shared':
+                            s.add('E207', mod, n.line, 'exclusif-sur-partage',
+                                  f'{r} en position {i}', 'var | own | clone')
+                        if r in exclusive: dup.add(r)
+                        exclusive.append(r)
+                for r in dict.fromkeys(exclusive):
+                    if r in dup:                      # racine
+                        s.add('E206', mod, n.line, 'exclusif-double',
+                              f'{r} emprunte deux fois', 'clone | split')
+                    elif len(seen[r]) > 1:            # sinon seulement, la cascade
+                        s.add('E208', mod, n.line, 'alias-pendant-exclusif',
+                              f'{r} lu pendant son emprunt exclusif', 'clone | reorder')
+
+    def _bblock(s, mod, stmts, scope, varidx):
+        for st in stmts:
+            k = st.kind
+            if k == 'Let':
+                s._bexpr(mod, st.expr, scope, varidx)
+                scope[st.name] = 'mut' if st.mut else 'shared'
+            elif k == 'Assign':
+                s._bexpr(mod, st.expr, scope, varidx)
+                r = root_of(st.target)
+                if r and scope.get(r) == 'shared':
+                    what = r if st.target.kind == 'Name' else f'{r} (via {st.target.kind.lower()})'
+                    s.add('E205', mod, st.line, 'mutation-sans-var', what, 'var | own')
+            elif k == 'For':
+                s._bexpr(mod, st.iter, scope, varidx)
+                inner = dict(scope)
+                # le mode d'une liaison de boucle est herite de la collection
+                # parcourue, et seulement quand celle-ci est un nom simple.
+                m = scope.get(st.iter.name, 'shared') if st.iter.kind == 'Name' else None
+                for nm in st.names:
+                    if m is None: inner.pop(nm, None)
+                    else: inner[nm] = m
+                s._bblock(mod, st.body, inner, varidx)
+            elif k == 'Match':
+                s._bexpr(mod, st.subj, scope, varidx)
+                for pat, body in st.arms:
+                    inner = dict(scope)
+                    for b in pat.binds: inner.pop(b, None)
+                    s._bblock(mod, body, inner, varidx)
+            elif k in ('If', 'While', 'Region', 'Par', 'With'):
+                for f in ('cond', 'expr', 'iter'):
+                    if getattr(st, f, None) is not None:
+                        s._bexpr(mod, getattr(st, f), scope, varidx)
+                inner = dict(scope)
+                if k == 'With': inner[st.name] = 'mut'
+                if k == 'Region': inner[st.name] = 'shared'
+                s._bblock(mod, st.body, inner, varidx)
+                if getattr(st, 'els', None): s._bblock(mod, st.els, dict(scope), varidx)
+            elif k in ('ExprStmt', 'Return', 'Spawn'):
+                if getattr(st, 'expr', None) is not None:
+                    s._bexpr(mod, st.expr, scope, varidx)
+
     # ═════════════════════════════════ pilote
 
     def run(s):
         s.infer_effects()
         for f in (s.check_modes, s.check_effects, s.check_annotations,
                   s.check_total_ops, s.check_regions, s.check_moves,
-                  s.check_coverage, s.check_raw):
+                  s.check_coverage, s.check_raw, s.check_borrows):
             f()
         # racines d'abord : erreurs avant obligations, puis par fichier et ligne
         s.obs.sort(key=lambda o: (o.sev != 'E', o.file, o.line, o.code))
@@ -315,7 +423,7 @@ class Sealer:
 
 # ── ce que ce verificateur ne fait PAS
 BLIND_SPOTS = [
-    'Emprunts : `var` n\'est pas verifie. Deux emprunts exclusifs simultanes passent.',
+    'Emprunts : mutabilite et unicite verifiees seulement quand la racine de l\'acces \n    est un nom simple connu de la portee. A travers une expression composee \n    (`a.b[i]`, un resultat d\'appel), rien n\'est conclu — faux negatif assume.',
     'Arithmetique : O221/O222 (§10.3) demandent une analyse de plages, absente.',
     'Types : aucune inference ni verification. O301 ne voit que les annotations manquantes.',
     'Verrous : O230 (§11.4) demande un graphe de rangs, absent.',
