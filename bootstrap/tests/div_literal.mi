@@ -1,0 +1,11 @@
+# expect: sealed
+seal mod div_literal
+
+pub fn half(n: u32) -> u32:
+  n / 2
+
+pub fn slot(i: u32) -> u32:
+  i % 4
+
+test half: half(10) == 5
+test slot: slot(7) == 3

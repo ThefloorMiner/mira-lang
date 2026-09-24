@@ -89,6 +89,14 @@ def waiver_reason(test):
     return ''.join(x[1] for x in p if x[0] == 'lit')
 
 
+def _txt(e):
+    """Operande court pour l'affichage d'une obligation : valeur litterale,
+    nom simple, `…` sinon."""
+    if e.kind == 'Num': return str(e.v)
+    if e.kind == 'Name': return e.name
+    return '…'
+
+
 class Sealer:
     def __init__(s, asts, root):
         s.asts, s.root, s.obs = asts, root, []
@@ -170,14 +178,20 @@ class Sealer:
                 if st.kind == 'Let' and (st.type or '').startswith('Map'):
                     maps.add(st.name)
             for n in fn_body_nodes(fn):
-                if n.kind != 'Index': continue
-                base = getattr(n.obj, 'name', None)
-                if base in maps:
-                    s.add('O204', mod, n.line, 'index-dyn',
-                          f'{base}[…]', 'upsert | get_or')
-                else:
-                    s.add('O220', mod, n.line, 'index-non-prouve',
-                          f'{base or "…"}[…]', 'for-in | get | assert-range')
+                if n.kind == 'Index':
+                    base = getattr(n.obj, 'name', None)
+                    if base in maps:
+                        s.add('O204', mod, n.line, 'index-dyn',
+                              f'{base}[…]', 'upsert | get_or')
+                    else:
+                        s.add('O220', mod, n.line, 'index-non-prouve',
+                              f'{base or "…"}[…]', 'for-in | get | assert-range')
+                elif n.kind == 'Bin' and n.op in ('/', '%'):
+                    d = n.r
+                    if d.kind == 'Num' and isinstance(d.v, int) and d.v != 0:
+                        continue                    # diviseur litteral non nul : rien a prouver
+                    s.add('O222', mod, n.line, 'div-non-prouve',
+                          f'{_txt(n.l)} {n.op} {_txt(d)}', 'assert | try')
 
     # ═════════════════════════════════ 4. echappement de region (§2.3)
 
@@ -429,7 +443,8 @@ class Sealer:
 # ── ce que ce verificateur ne fait PAS
 BLIND_SPOTS = [
     'Emprunts : mutabilite et unicite verifiees seulement quand la racine de l\'acces \n    est un nom simple connu de la portee. A travers une expression composee \n    (`a.b[i]`, un resultat d\'appel), rien n\'est conclu — faux negatif assume.',
-    'Arithmetique : O221/O222 (§10.3) demandent une analyse de plages, absente.',
+    'Arithmetique : O221 (§10.3) demande une analyse de plages, absente.',
+    'Divisions : O222 (§10.3) couvert en conservateur — tout `/` ou `%` dont le \n    diviseur n\'est pas un litteral entier non nul est une obligation. Aucune \n    decharge : `assert` (le fix de la spec) n\'existe pas encore dans le parseur, \n    et une comparaison nue hors d\'un bloc `test` n\'arrete rien. Les affectations \n    composees `/=` et `%=` ne sont pas comptees.',
     'Types : aucune inference ni verification. O301 ne voit que les annotations manquantes.',
     'Verrous : O230 (§11.4) demande un graphe de rangs, absent.',
     'GPU : E240 (§12.2) n\'est pas implemente.',
