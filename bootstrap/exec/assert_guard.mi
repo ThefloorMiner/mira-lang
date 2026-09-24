@@ -1,0 +1,11 @@
+# expect: E330 assertion fausse
+draft mod assert_guard
+
+# `assert d != 0` doit arreter l'execution avant la division : ratio(10, 0)
+# rend l'erreur d'assertion, jamais un ZeroDivisionError Python.
+fn ratio(n: u32, d: u32) -> u32:
+  assert d != 0
+  n / d
+
+fn main():
+  ratio(10, 0)

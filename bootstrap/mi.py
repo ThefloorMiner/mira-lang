@@ -20,7 +20,7 @@ KEYWORDS = {
     'fn','let','var','own','pub','type','trait','impl','err','ok','for','in',
     'if','else','while','match','return','test','prop','region','par','spawn',
     'raw','as','and','or','not','true','false','none','some','pass','break',
-    'continue','derive','self','seal','draft','mod','with','gpu','use',
+    'continue','assert','derive','self','seal','draft','mod','with','gpu','use',
 }
 OPS = ['->','==','!=','<=','>=','+=','-=','*=','/=','..','|','(',')','[',']',
        '{','}',',',':','.','?','!','=','<','>','+','-','*','/','%']
@@ -370,6 +370,7 @@ class Parser:
             s.next(); nm = s.eat('NAME').val; s.eat('OP', ':')
             ty = s.type_(); s.eat('OP', '->')
             return N('Prop', line=ln, name=nm, type=ty, expr=s.expr())
+        if s.atkw('assert'):   s.next(); return N('Assert', line=ln, expr=s.expr())
         if s.atkw('pass'):     s.next(); return N('Pass', line=ln)
         if s.atkw('break'):    s.next(); return N('Break', line=ln)
         if s.atkw('continue'): s.next(); return N('Continue', line=ln)
@@ -808,6 +809,14 @@ class Interp:
             else: raise MiError('E322', st.line, 'cible d\'affectation invalide')
             return UNIT
         if k == 'Return': raise RetSig(s.eval(st.expr, env) if st.expr else UNIT)
+        if k == 'Assert':
+            # E330 : aucune faute d'arithmetique n'est nommee dans l'amorce (la
+            # division par zero remonte en ZeroDivisionError Python). C'est le
+            # premier garde nomme ; dans un bloc `test`, cmd_test le compte
+            # comme une assertion ordinaire, sans regle separée.
+            if not truthy(s.eval(st.expr, env)):
+                raise MiError('E330', st.line, 'assertion fausse')
+            return UNIT
         if k == 'If':
             if truthy(s.eval(st.cond, env)): return s.block(st.body, Env(env))
             if st.els is not None: return s.block(st.els, Env(env))
@@ -917,6 +926,12 @@ class Interp:
             a, b = s.eval(e.l, env), s.eval(e.r, env)
             if e.op == '==': return a == b
             if e.op == '!=': return a != b
+            if e.op in ('/', '%') and type(a) is int and type(b) is int:
+                # Entiers : semantique C (§10) — quotient tronque vers zero, reste
+                # du signe du dividende. Python donnerait 7/2 = 3.5 et -7 % 2 = 1.
+                if b == 0: raise MiError('E331', e.line, 'division par zero')
+                q = abs(a) // abs(b) * (1 if (a < 0) == (b < 0) else -1)
+                return q if e.op == '/' else a - b * q
             try:
                 return {'+': lambda x, y: x + y, '-': lambda x, y: x - y,
                         '*': lambda x, y: x * y, '/': lambda x, y: x / y,

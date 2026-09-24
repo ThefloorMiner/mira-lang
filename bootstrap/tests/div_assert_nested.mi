@@ -1,0 +1,11 @@
+# expect: O222
+seal mod div_assert_nested
+
+# L'affirmation est dans un `if` : elle ne dit rien de la valeur de `d` au
+# moment de la division, qui est hors du branch. Elle ne decharge donc pas.
+pub fn ratio(n: u32, d: u32) -> u32:
+  if d != 0:
+    assert d != 0
+  n / d
+
+test ratio: ratio(10, 2) == 5
