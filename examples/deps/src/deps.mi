@@ -75,7 +75,7 @@ fn chain(n: u32) -> Vec[Mod]:
         .collect()
 
 fn ring(n: u32) -> Vec[Mod]:
-  (0..n).map(i -> Mod{name: id(i), uses: [id((i + 1) % n)]}).collect()
+  (0..n).map(i -> Mod{name: id(i), uses: [id(if i + 1 == n: 0 else: i + 1)]}).collect()
 
 test scan: "lit le disque — couvert en integration, pas en unitaire"
 

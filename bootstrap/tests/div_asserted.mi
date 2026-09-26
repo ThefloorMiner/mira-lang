@@ -1,0 +1,11 @@
+# expect: sealed
+seal mod div_asserted
+
+# `assert d != 0` au niveau superieur du corps, avant la division : c'est le fix
+# de §10.3. L'assertion est un garde a l'execution (E330), donc tout appel qui
+# atteint `n / d` l'a franchie — O222 est dechargee.
+pub fn ratio(n: u32, d: u32) -> u32:
+  assert d != 0
+  n / d
+
+test ratio: ratio(10, 2) == 5

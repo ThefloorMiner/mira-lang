@@ -1,0 +1,10 @@
+# expect: E331 division par zero
+draft mod div_zero
+
+# Sans assert, une division entiere par zero est une erreur Mira nommee,
+# pas un ZeroDivisionError de l'interprete.
+fn ratio(n: u32, d: u32) -> u32:
+  n / d
+
+fn main():
+  ratio(10, 0)

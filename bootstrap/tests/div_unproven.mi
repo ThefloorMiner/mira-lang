@@ -1,0 +1,11 @@
+# expect: O222 O222
+seal mod div_unproven
+
+pub fn part(n: u32, d: u32) -> u32:
+  n / d
+
+pub fn slot(i: u32, pas: u32) -> u32:
+  i % pas
+
+test part: part(10, 2) == 5
+test slot: slot(7, 3) == 1

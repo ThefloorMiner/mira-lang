@@ -89,6 +89,14 @@ def waiver_reason(test):
     return ''.join(x[1] for x in p if x[0] == 'lit')
 
 
+def _txt(e):
+    """Operande court pour l'affichage d'une obligation : valeur litterale,
+    nom simple, `…` sinon."""
+    if e.kind == 'Num': return str(e.v)
+    if e.kind == 'Name': return e.name
+    return '…'
+
+
 class Sealer:
     def __init__(s, asts, root):
         s.asts, s.root, s.obs = asts, root, []
@@ -162,6 +170,62 @@ class Sealer:
 
     # ═════════════════════════════════ 3. operations partielles (§10.3)
 
+    def _div_guards(s, fn):
+        """Decharge de O222 : `assert d != 0` ou `assert d > 0` (d nom simple,
+        0 litteral) placee au NIVEAU SUPERIEUR du corps. Un assert y est
+        l'instruction la moins chere qui prouve une borne : l'appel qui atteint
+        la division l'a necessairement franchie (E330 sinon). Un assert dans un
+        `if` ou une boucle ne dit rien de la valeur au moment de la division.
+
+        Rend (affirms, rebinds, spans, lams) :
+          affirms : nom -> lignes d'affirmation au niveau superieur
+          rebinds : nom -> lignes ou le nom est reassigne, redefini ou lie, a
+                    quelque profondeur — regle de lignes, pas de flux de donnees
+          spans   : etendues [lo, hi] des corps de boucle
+          lams    : id() des noeuds sous un lambda : un `d` y est un autre `d`
+        """
+        affirms, rebinds, spans, lams = {}, {}, [], set()
+        def rebind(nm, line): rebinds.setdefault(nm, []).append(line)
+        for st in fn.body:
+            if st.kind == 'Assert':
+                e = st.expr
+                if (e.kind == 'Bin' and e.op in ('!=', '>')
+                        and e.l.kind == 'Name' and e.r.kind == 'Num'
+                        and isinstance(e.r.v, int) and e.r.v == 0):
+                    affirms.setdefault(e.l.name, []).append(st.line)
+        for n in walk(fn.body):
+            if n.kind == 'Assign' and n.target.kind == 'Name':
+                rebind(n.target.name, n.line)       # `d = …` comme `d -= …`
+            elif n.kind == 'Let':
+                rebind(n.name, n.line)
+            elif n.kind == 'LetTuple':
+                for nm in n.names: rebind(nm, n.line)
+            elif n.kind == 'For':
+                for nm in n.names: rebind(nm, n.line)
+                lines = [m.line for m in walk(n.body)]
+                if lines: spans.append((min(lines), max(lines)))
+            elif n.kind == 'While':
+                lines = [m.line for m in walk(n.body)]
+                if lines: spans.append((min(lines), max(lines)))
+            elif n.kind == 'Lambda':
+                lams.update(id(m) for m in walk(n.body))
+        return affirms, rebinds, spans, lams
+
+    def _proved(s, guards, node):
+        affirms, rebinds, spans, lams = guards
+        d = node.r
+        if id(node) in lams: return False       # diviseur d'un lambda : autre portee
+        rs = rebinds.get(d.name, ())
+        for g in affirms.get(d.name, ()):
+            if g >= node.line: continue
+            if any(g < r < node.line for r in rs):
+                continue                        # d reassigne entre l'assert et la division
+            loop = [(lo, hi) for lo, hi in spans if lo <= node.line <= hi]
+            if loop and any(lo <= r <= hi for lo, hi in loop for r in rs):
+                continue                        # d modifie dans la boucle qui divise
+            return True
+        return False
+
     def check_total_ops(s):
         for (mod, name), fn in s.fns.items():
             if s.asts[mod].mode != 'seal': continue
@@ -169,15 +233,24 @@ class Sealer:
             for st in fn_body_nodes(fn):
                 if st.kind == 'Let' and (st.type or '').startswith('Map'):
                     maps.add(st.name)
+            guards = s._div_guards(fn)
             for n in fn_body_nodes(fn):
-                if n.kind != 'Index': continue
-                base = getattr(n.obj, 'name', None)
-                if base in maps:
-                    s.add('O204', mod, n.line, 'index-dyn',
-                          f'{base}[…]', 'upsert | get_or')
-                else:
-                    s.add('O220', mod, n.line, 'index-non-prouve',
-                          f'{base or "…"}[…]', 'for-in | get | assert-range')
+                if n.kind == 'Index':
+                    base = getattr(n.obj, 'name', None)
+                    if base in maps:
+                        s.add('O204', mod, n.line, 'index-dyn',
+                              f'{base}[…]', 'upsert | get_or')
+                    else:
+                        s.add('O220', mod, n.line, 'index-non-prouve',
+                              f'{base or "…"}[…]', 'for-in | get | assert-range')
+                elif n.kind == 'Bin' and n.op in ('/', '%'):
+                    d = n.r
+                    if d.kind == 'Num' and isinstance(d.v, int) and d.v != 0:
+                        continue                    # diviseur litteral non nul : rien a prouver
+                    if d.kind == 'Name' and s._proved(guards, n):
+                        continue                    # `assert d != 0` avant la division
+                    s.add('O222', mod, n.line, 'div-non-prouve',
+                          f'{_txt(n.l)} {n.op} {_txt(d)}', 'assert | try')
 
     # ═════════════════════════════════ 4. echappement de region (§2.3)
 
@@ -409,7 +482,7 @@ class Sealer:
                 if k == 'Region': inner[st.name] = 'shared'
                 s._bblock(mod, st.body, inner, varidx)
                 if getattr(st, 'els', None): s._bblock(mod, st.els, dict(scope), varidx)
-            elif k in ('ExprStmt', 'Return', 'Spawn'):
+            elif k in ('ExprStmt', 'Return', 'Spawn', 'Assert'):
                 if getattr(st, 'expr', None) is not None:
                     s._bexpr(mod, st.expr, scope, varidx)
 
@@ -429,7 +502,8 @@ class Sealer:
 # ── ce que ce verificateur ne fait PAS
 BLIND_SPOTS = [
     'Emprunts : mutabilite et unicite verifiees seulement quand la racine de l\'acces \n    est un nom simple connu de la portee. A travers une expression composee \n    (`a.b[i]`, un resultat d\'appel), rien n\'est conclu — faux negatif assume.',
-    'Arithmetique : O221/O222 (§10.3) demandent une analyse de plages, absente.',
+    'Arithmetique : O221 (§10.3) demande une analyse de plages, absente.',
+    'Divisions : O222 (§10.3) couvert en conservateur — tout `/` ou `%` dont le \n    diviseur n\'est pas un litteral entier non nul est une obligation. Seule \n    forme de decharge : `assert d != 0` ou `assert d > 0` (d nom simple) au \n    niveau superieur du corps, avant la division, sans que d soit reassigne \n    entre les deux ni dans une boucle qui contient la division — regle de \n    lignes, pas de flux de donnees. Un assert dans un `if` ou une boucle ne \n    decharge jamais, toute autre affirmation ne prouve rien, et les affectations \n    composees `/=` et `%=` ne sont pas comptees.',
     'Types : aucune inference ni verification. O301 ne voit que les annotations manquantes.',
     'Verrous : O230 (§11.4) demande un graphe de rangs, absent.',
     'GPU : E240 (§12.2) n\'est pas implemente.',

@@ -1,0 +1,12 @@
+# expect: aucune erreur
+draft mod div_entiere
+
+# Division entiere a la C : quotient tronque vers zero, reste du signe du
+# dividende. Les flottants gardent la division reelle.
+fn main():
+  assert 7 / 2 == 3
+  assert -7 / 2 == -3
+  assert 7 / -2 == -3
+  assert -7 % 2 == -1
+  assert 7 % -2 == 1
+  assert 7.0 / 2.0 == 3.5
